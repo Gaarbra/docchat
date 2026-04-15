@@ -1,4 +1,7 @@
-"""AI-powered document chat agent that lets users query files using natural language and shell-like commands."""
+"""AI-powered document chat agent.
+
+Lets users query files using natural language and shell-like commands.
+"""
 
 import ast
 import glob
@@ -16,13 +19,19 @@ CALCULATE_SCHEMA = {
     'type': 'function',
     'function': {
         'name': 'calculate',
-        'description': 'Evaluate a simple arithmetic expression and return the result.',
+        'description': (
+            'Evaluate a simple arithmetic expression and '
+            'return the result.'
+        ),
         'parameters': {
             'type': 'object',
             'properties': {
                 'expression': {
                     'type': 'string',
-                    'description': 'The arithmetic expression to evaluate, e.g. "2 + 2" or "10 * (3 + 4)".',
+                    'description': (
+                        'The arithmetic expression to evaluate, '
+                        'e.g. "2 + 2" or "10 * (3 + 4)".'
+                    ),
                 },
             },
             'required': ['expression'],
@@ -34,13 +43,19 @@ LS_SCHEMA = {
     'type': 'function',
     'function': {
         'name': 'ls',
-        'description': 'List files and folders in a directory. Optionally takes a path argument.',
+        'description': (
+            'List files and folders in a directory. '
+            'Optionally takes a path argument.'
+        ),
         'parameters': {
             'type': 'object',
             'properties': {
                 'path': {
                     'type': 'string',
-                    'description': 'The directory path to list. Defaults to the current directory.',
+                    'description': (
+                        'The directory path to list. Defaults to '
+                        'the current directory.'
+                    ),
                 },
             },
             'required': [],
@@ -70,7 +85,10 @@ GREP_SCHEMA = {
     'type': 'function',
     'function': {
         'name': 'grep',
-        'description': 'Search for lines matching a regex pattern in a file or directory.',
+        'description': (
+            'Search for lines matching a regex pattern '
+            'in a file or directory.'
+        ),
         'parameters': {
             'type': 'object',
             'properties': {
@@ -80,7 +98,10 @@ GREP_SCHEMA = {
                 },
                 'path': {
                     'type': 'string',
-                    'description': 'The file or directory path to search. Defaults to current directory.',
+                    'description': (
+                        'The file or directory path to search. '
+                        'Defaults to current directory.'
+                    ),
                 },
             },
             'required': ['pattern'],
@@ -105,7 +126,9 @@ _ALLOWED_OPS = {
 
 def _eval_node(node):
     """
-    Recursively evaluate a single AST node, raising ValueError for unsafe expressions.
+    Recursively evaluate a single AST node.
+
+    Raises ValueError for unsafe expressions.
 
     >>> _eval_node(ast.parse('2 + 2', mode='eval').body)
     4
@@ -135,7 +158,9 @@ def _eval_node(node):
 
 def is_path_safe(path):
     """
-    Returns True if a path is safe to read (no absolute paths, no directory traversal).
+    Returns True if a path is safe to read.
+
+    Checks for absolute paths or directory traversal.
 
     >>> is_path_safe('README.md')
     True
@@ -162,10 +187,10 @@ def is_path_safe(path):
 
 class Chat:
     """
-    A chat agent that can answer questions about files using tool calls.
+    A chat agent answering questions about files via tool calls.
 
-    The agent supports four tools: calculate, ls, cat, and grep.
-    Users can invoke tools manually with /command syntax or let the LLM call them automatically.
+    Supports four tools: calculate, ls, cat, and grep. Users can invoke
+    tools manually with /command syntax or let the LLM call automatically.
 
     >>> c = Chat()
     >>> isinstance(c.messages, list)
@@ -187,10 +212,9 @@ class Chat:
     """
 
     def __init__(self):
-        """Initialize a Chat instance with an empty message history and a Groq client."""
+        """Initialize Chat with empty message history and Groq client."""
         self.messages = []
         self.client = Groq()
-        # Map tool names to the methods on this class instance
         self.tool_dispatch = {
             'calculate': self.calculate,
             'ls': self.ls,
@@ -200,9 +224,10 @@ class Chat:
 
     def calculate(self, expression):
         """
-        Evaluate a simple arithmetic expression and return the result as a string.
+        Evaluate a simple arithmetic expression and return the result.
 
-        Supports +, -, *, /, //, %, **, and parentheses. Rejects anything unsafe.
+        Supports +, -, *, /, //, %, **, and parentheses.
+        Rejects anything unsafe.
 
         >>> c = Chat()
         >>> c.calculate('2 + 2')
@@ -233,9 +258,7 @@ class Chat:
         try:
             tree = ast.parse(expression, mode='eval')
             result = _eval_node(tree.body)
-            # Return integer string if result is a whole number
             if isinstance(result, float) and result.is_integer():
-                # Only simplify if the expression itself used integer division
                 if '/' in expression and '//' not in expression:
                     return str(result)
                 return str(int(result))
@@ -279,7 +302,7 @@ class Chat:
 
     def grep(self, pattern, path='.'):
         """
-        Search for lines matching a regex pattern in a file or directory (recursive).
+        Search for lines matching a regex pattern (recursive).
 
         Returns matching lines as 'filename:line', or an error string.
 
@@ -315,7 +338,9 @@ class Chat:
 
         for filepath in files:
             try:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(
+                    filepath, 'r', encoding='utf-8', errors='ignore'
+                ) as f:
                     for line in f:
                         if compiled.search(line):
                             results.append(f'{filepath}:{line.rstrip()}')
@@ -326,7 +351,7 @@ class Chat:
 
     def ls(self, path='.'):
         """
-        List files and folders in a directory, sorted asciibetically, one per line.
+        List files/folders in a directory, asciibetically, one per line.
 
         >>> c = Chat()
         >>> 'chat.py' in c.ls('.')
@@ -368,7 +393,9 @@ class Chat:
 
     def chat(self, user_message):
         """
-        Send a user message to the LLM and handle any tool call loops, returning the final response.
+        Send a user message to the LLM and handle any tool call loops.
+
+        Returns the final response.
 
         >>> c = Chat()
         >>> response = c.chat('Say only the word HELLO and nothing else.')
@@ -427,14 +454,17 @@ class Chat:
                     print('Available commands: /calculate, /ls, /cat, /grep')
                     continue
                 args_list = parts[1:]
-                # Build kwargs based on tool
+                
                 if tool_name == 'ls':
                     kwargs = {'path': args_list[0]} if args_list else {}
                 elif tool_name == 'cat':
                     kwargs = {'path': args_list[0]} if args_list else {}
                 elif tool_name == 'grep':
                     if len(args_list) >= 2:
-                        kwargs = {'pattern': args_list[0], 'path': args_list[1]}
+                        kwargs = {
+                            'pattern': args_list[0],
+                            'path': args_list[1]
+                        }
                     elif len(args_list) == 1:
                         kwargs = {'pattern': args_list[0], 'path': '.'}
                     else:
@@ -448,14 +478,20 @@ class Chat:
 
                 result = self.run_tool(tool_name, kwargs)
                 print(result)
-                # Add to message history so LLM has context
+                
                 self.messages.append({
                     'role': 'user',
-                    'content': f'[manual command] /{tool_name} {" ".join(args_list)}\nOutput:\n{result}',
+                    'content': (
+                        f'[manual command] /{tool_name} '
+                        f'{" ".join(args_list)}\nOutput:\n{result}'
+                    ),
                 })
                 self.messages.append({
                     'role': 'assistant',
-                    'content': f'I ran `/{tool_name} {" ".join(args_list)}` and got:\n{result}',
+                    'content': (
+                        f'I ran `/{tool_name} {" ".join(args_list)}` '
+                        f'and got:\n{result}'
+                    ),
                 })
             else:
                 response = self.chat(user_input)
@@ -464,13 +500,12 @@ class Chat:
 
 def main():
     """
-    Entry point: optionally accept a message as a CLI argument, otherwise start the repl.
+    Entry point: accept CLI args or start the repl.
 
     This function is not tested via doctests because it performs IO.
     """
     c = Chat()
     if len(sys.argv) > 1:
-        # Extra credit: single message mode
         message = ' '.join(sys.argv[1:])
         response = c.chat(message)
         print(response)
