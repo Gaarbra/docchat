@@ -1,25 +1,136 @@
 """AI-powered document chat agent that lets users query files using natural language and shell-like commands."""
 
+import ast
+import glob
 import json
+import operator
 import os
+import re
 import sys
 
 from groq import Groq
 
-from tools.calculate import calculate, TOOL_SCHEMA as CALCULATE_SCHEMA
-from tools.ls import ls, TOOL_SCHEMA as LS_SCHEMA
-from tools.cat import cat, TOOL_SCHEMA as CAT_SCHEMA
-from tools.grep import grep, TOOL_SCHEMA as GREP_SCHEMA
-
 MODEL = 'llama-3.3-70b-versatile'
 
-ALL_TOOL_SCHEMAS = [CALCULATE_SCHEMA, LS_SCHEMA, CAT_SCHEMA, GREP_SCHEMA]
-TOOL_DISPATCH = {
-    'calculate': calculate,
-    'ls': ls,
-    'cat': cat,
-    'grep': grep,
+CALCULATE_SCHEMA = {
+    'type': 'function',
+    'function': {
+        'name': 'calculate',
+        'description': 'Evaluate a simple arithmetic expression and return the result.',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'expression': {
+                    'type': 'string',
+                    'description': 'The arithmetic expression to evaluate, e.g. "2 + 2" or "10 * (3 + 4)".',
+                },
+            },
+            'required': ['expression'],
+        },
+    },
 }
+
+LS_SCHEMA = {
+    'type': 'function',
+    'function': {
+        'name': 'ls',
+        'description': 'List files and folders in a directory. Optionally takes a path argument.',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'path': {
+                    'type': 'string',
+                    'description': 'The directory path to list. Defaults to the current directory.',
+                },
+            },
+            'required': [],
+        },
+    },
+}
+
+CAT_SCHEMA = {
+    'type': 'function',
+    'function': {
+        'name': 'cat',
+        'description': 'Read and return the contents of a text file.',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'path': {
+                    'type': 'string',
+                    'description': 'The path to the file to read.',
+                },
+            },
+            'required': ['path'],
+        },
+    },
+}
+
+GREP_SCHEMA = {
+    'type': 'function',
+    'function': {
+        'name': 'grep',
+        'description': 'Search for lines matching a regex pattern in a file or directory.',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'pattern': {
+                    'type': 'string',
+                    'description': 'The regex pattern to search for.',
+                },
+                'path': {
+                    'type': 'string',
+                    'description': 'The file or directory path to search. Defaults to current directory.',
+                },
+            },
+            'required': ['pattern'],
+        },
+    },
+}
+
+ALL_TOOL_SCHEMAS = [CALCULATE_SCHEMA, LS_SCHEMA, CAT_SCHEMA, GREP_SCHEMA]
+
+_ALLOWED_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+    ast.Mod: operator.mod,
+    ast.FloorDiv: operator.floordiv,
+}
+
+
+def _eval_node(node):
+    """
+    Recursively evaluate a single AST node, raising ValueError for unsafe expressions.
+
+    >>> _eval_node(ast.parse('2 + 2', mode='eval').body)
+    4
+    >>> _eval_node(ast.parse('3 * 7', mode='eval').body)
+    21
+    """
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        raise ValueError('invalid expression')
+    elif isinstance(node, ast.BinOp):
+        op_type = type(node.op)
+        if op_type not in _ALLOWED_OPS:
+            raise ValueError('invalid expression')
+        left = _eval_node(node.left)
+        right = _eval_node(node.right)
+        return _ALLOWED_OPS[op_type](left, right)
+    elif isinstance(node, ast.UnaryOp):
+        op_type = type(node.op)
+        if op_type not in _ALLOWED_OPS:
+            raise ValueError('invalid expression')
+        operand = _eval_node(node.operand)
+        return _ALLOWED_OPS[op_type](operand)
+    else:
+        raise ValueError('invalid expression')
 
 
 def is_path_safe(path):
@@ -28,7 +139,7 @@ def is_path_safe(path):
 
     >>> is_path_safe('README.md')
     True
-    >>> is_path_safe('tools/ls.py')
+    >>> is_path_safe('chat.py')
     True
     >>> is_path_safe('/etc/passwd')
     False
@@ -64,7 +175,7 @@ class Chat:
     >>> result = c.run_tool('ls', {'path': '.'})
     >>> 'chat.py' in result
     True
-    >>> result = c.run_tool('cat', {'path': 'README.md'})
+    >>> result = c.run_tool('cat', {'path': 'chat.py'})
     >>> isinstance(result, str)
     True
     >>> result = c.run_tool('calculate', {'expression': '2 + 2'})
@@ -79,6 +190,159 @@ class Chat:
         """Initialize a Chat instance with an empty message history and a Groq client."""
         self.messages = []
         self.client = Groq()
+        # Map tool names to the methods on this class instance
+        self.tool_dispatch = {
+            'calculate': self.calculate,
+            'ls': self.ls,
+            'cat': self.cat,
+            'grep': self.grep,
+        }
+
+    def calculate(self, expression):
+        """
+        Evaluate a simple arithmetic expression and return the result as a string.
+
+        Supports +, -, *, /, //, %, **, and parentheses. Rejects anything unsafe.
+
+        >>> c = Chat()
+        >>> c.calculate('2 + 2')
+        '4'
+        >>> c.calculate('10 * 5')
+        '50'
+        >>> c.calculate('100 / 4')
+        '25.0'
+        >>> c.calculate('2 ** 8')
+        '256'
+        >>> c.calculate('(3 + 4) * 2')
+        '14'
+        >>> c.calculate('10 % 3')
+        '1'
+        >>> c.calculate('10 // 3')
+        '3'
+        >>> c.calculate('-5 + 3')
+        '-2'
+        >>> c.calculate('1 / 0')
+        'Error: division by zero'
+        >>> c.calculate('__import__("os")')
+        'Error: invalid expression'
+        >>> c.calculate('abc')
+        'Error: invalid expression'
+        >>> c.calculate('open("file")')
+        'Error: invalid expression'
+        """
+        try:
+            tree = ast.parse(expression, mode='eval')
+            result = _eval_node(tree.body)
+            # Return integer string if result is a whole number
+            if isinstance(result, float) and result.is_integer():
+                # Only simplify if the expression itself used integer division
+                if '/' in expression and '//' not in expression:
+                    return str(result)
+                return str(int(result))
+            return str(result)
+        except ZeroDivisionError:
+            return 'Error: division by zero'
+        except (ValueError, TypeError):
+            return 'Error: invalid expression'
+        except SyntaxError:
+            return 'Error: invalid expression'
+
+    def cat(self, path):
+        """
+        Read and return the full text contents of a file.
+
+        >>> c = Chat()
+        >>> c.cat('chat.py')[:7]
+        '\"\"\"AI-p'
+        >>> c.cat('nonexistent_file_xyz.txt')
+        'Error: file not found'
+        >>> c.cat('/etc/passwd')
+        'Error: unsafe path'
+        >>> c.cat('../secret.txt')
+        'Error: unsafe path'
+        """
+        if not is_path_safe(path):
+            return 'Error: unsafe path'
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            return 'Error: file not found'
+        except UnicodeDecodeError:
+            try:
+                with open(path, 'r', encoding='utf-16') as f:
+                    return f.read()
+            except Exception:
+                return 'Error: cannot decode file'
+        except Exception as e:
+            return f'Error: {e}'
+
+    def grep(self, pattern, path='.'):
+        """
+        Search for lines matching a regex pattern in a file or directory (recursive).
+
+        Returns matching lines as 'filename:line', or an error string.
+
+        >>> c = Chat()
+        >>> result = c.grep('def is_path_safe', 'chat.py')
+        >>> 'chat.py' in result
+        True
+        >>> c.grep('def ', '/etc')
+        'Error: unsafe path'
+        >>> c.grep('def ', '../other')
+        'Error: unsafe path'
+        >>> c.grep('zzznomatch_xyz', 'chat.py')
+        ''
+        >>> c.grep('[invalid', 'chat.py')
+        'Error: invalid pattern: unterminated character set at position 0'
+        """
+        if not is_path_safe(path):
+            return 'Error: unsafe path'
+        try:
+            compiled = re.compile(pattern)
+        except re.error as e:
+            return f'Error: invalid pattern: {e}'
+
+        results = []
+        if os.path.isfile(path):
+            files = [path]
+        else:
+            files = []
+            for root, dirs, filenames in os.walk(path):
+                dirs[:] = sorted([d for d in dirs if not d.startswith('.')])
+                for fname in sorted(filenames):
+                    files.append(os.path.join(root, fname))
+
+        for filepath in files:
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        if compiled.search(line):
+                            results.append(f'{filepath}:{line.rstrip()}')
+            except Exception:
+                continue
+
+        return '\n'.join(results)
+
+    def ls(self, path='.'):
+        """
+        List files and folders in a directory, sorted asciibetically, one per line.
+
+        >>> c = Chat()
+        >>> 'chat.py' in c.ls('.')
+        True
+        >>> c.ls('/etc')
+        'Error: unsafe path'
+        >>> c.ls('../other')
+        'Error: unsafe path'
+        >>> c.ls('nonexistent_folder_xyz')
+        ''
+        """
+        if not is_path_safe(path):
+            return 'Error: unsafe path'
+        files = sorted(glob.glob(f'{path}/*'))
+        names = [os.path.basename(f) for f in files]
+        return '\n'.join(names)
 
     def run_tool(self, name, args):
         """
@@ -94,9 +358,9 @@ class Chat:
         >>> '50' in result
         True
         """
-        if name not in TOOL_DISPATCH:
+        if name not in self.tool_dispatch:
             return f'Error: unknown tool {name}'
-        func = TOOL_DISPATCH[name]
+        func = self.tool_dispatch[name]
         try:
             return func(**args)
         except Exception as e:
