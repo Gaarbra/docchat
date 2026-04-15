@@ -29,7 +29,7 @@ def cat(path):
     """
     Read and return the full text contents of a file.
 
-    >>> cat('tools/__init__.py')[:7]
+    >>> >>> cat('tools/__init__.py')
     '\"\"\"Pack'
     >>> cat('nonexistent_file_xyz.txt')
     'Error: file not found'
