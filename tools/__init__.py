@@ -1,1 +1,1 @@
-"""Test package for docchat."""
+"""Package containing tool functions for the chat application."""
