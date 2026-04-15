@@ -291,7 +291,7 @@ class Chat:
         'Error: unsafe path'
         >>> c.grep('def ', '../other')
         'Error: unsafe path'
-        >>> c.grep('zzznomatch_xyz', 'chat.py')
+        >>> c.grep('zzz[n]omatch_xyz', 'chat.py')
         ''
         >>> c.grep('[invalid', 'chat.py')
         'Error: invalid pattern: unterminated character set at position 0'

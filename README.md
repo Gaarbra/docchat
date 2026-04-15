@@ -2,7 +2,7 @@
 
 An AI-powered terminal agent that lets you ask questions about files and documents in natural language using LLM tool calling.
 
-![doctests](https://github.com/YOUR_USERNAME/docchat/actions/workflows/doctests.yml/badge.svg)
+![doctests](https://github.com/Gaarbra/docchat/actions/workflows/doctests.yml/badge.svg)
 ![integration tests](https://github.com/YOUR_USERNAME/docchat/actions/workflows/integration_tests.yml/badge.svg)
 ![flake8](https://github.com/YOUR_USERNAME/docchat/actions/workflows/flake8.yml/badge.svg)
 [![PyPI version](https://badge.fury.io/py/docchat.svg)](https://badge.fury.io/py/docchat)
